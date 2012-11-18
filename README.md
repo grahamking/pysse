@@ -7,7 +7,7 @@ Python - start the server:
 
 Javacript:
 
-    var source = new EventSource('/sse/');
+    var source = new EventSource('http://127.0.0.1:1234/');
     source.addEventListener('message', function(event) {
         alert(event.data);
     }, false);
