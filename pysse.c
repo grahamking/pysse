@@ -141,10 +141,10 @@ int start_epoll(int sockfd, int pipefd) {
 
 // Write the HTTP response headers
 void write_headers(int connfd) {
-    int sent = write(connfd, HEAD_TMPL, strlen(HEAD_TMPL));
 
-    if (sent == -1) {
-        perror("write_headers");
+    if ( write(connfd, HEAD_TMPL, strlen(HEAD_TMPL)) == -1 ) {
+        perror("write_headers: write error");
+        return;
     }
 
 #ifdef DEBUG
@@ -235,6 +235,7 @@ void fanfrom(int pipefd) {
         if ( write(clients[i], buf, num_read) == -1 ) {
             perror("fanfrom: Error write to client socket");
         }
+        printf("%d: Wrote to %d\n", i, clients[i]);
     }
 }
 
@@ -333,6 +334,8 @@ int start(const char *address, int port) {
     prctl(PR_SET_PDEATHSIG, SIGHUP);
 
     close(pipefds[1]);  // Close write end of the pipe - we only read
+
+    memset(&clients, 1024, sizeof(int));
 
     int sockfd = start_sock(address, port);
 
