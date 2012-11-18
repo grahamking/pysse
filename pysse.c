@@ -2,18 +2,8 @@
 /*
  * Copyright 2012 Graham King <graham@gkgk.org>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * What should license be: LGPL? BSD?
+ * It's a library.
  */
 
 #include <Python.h>
@@ -32,6 +22,8 @@
 #include <sys/prctl.h>
 
 #define DEBUG     // Comment in for verbose output
+
+#define HEAD_TMPL "HTTP/1.1 200 OK\nCache-Control: no-cache\nContent-Type: text/event-stream\n\n"
 
 // Number of connected server-sent events sockets
 int num_clients = 0;
@@ -108,7 +100,7 @@ int start_sock(const char *address, int port) {
 
     err = listen(sockfd, SOMAXCONN);
     if (err == -1) {
-        error(err, errno, "Error %d listening on socket", errno);
+        perror("start_sock: Error listening on sockfd");
     }
 
     return sockfd;
@@ -147,6 +139,19 @@ int start_epoll(int sockfd, int pipefd) {
     return efd;
 }
 
+// Write the HTTP response headers
+void write_headers(int connfd) {
+    int sent = write(connfd, HEAD_TMPL, strlen(HEAD_TMPL));
+
+    if (sent == -1) {
+        perror("write_headers");
+    }
+
+#ifdef DEBUG
+    printf("Wrote headers to %d\n", connfd);
+#endif
+}
+
 /* Accept a new connection on sockfd, and add it to epoll.
  *
  * We re-used the epoll_event to save allocating a new one each time on
@@ -163,7 +168,7 @@ int acceptnew(int sockfd, int efd, struct epoll_event *evp) {
             // worker process got there before us - no problem
             return 0;
         } else {
-            error(0, errno, "Error %d 'accept' on socket", errno);
+            perror("acceptnew: Error 'accept' on socket");
             return -1;
         }
     }
@@ -184,6 +189,8 @@ int acceptnew(int sockfd, int efd, struct epoll_event *evp) {
         error(EXIT_FAILURE, errno, "Error %d adding to epoll descriptor", errno);
     }
 
+    write_headers(connfd);
+
     clients[num_clients++] = connfd;  // clients and num_clients are global
 
     return 0;
@@ -196,7 +203,7 @@ void consume(int connfd) {
     int num_read = read(connfd, &buf, 1024);
 
     if (num_read == -1) {
-        error(0, errno, "Error %d reading from %d", errno, connfd);
+        perror("consume: Error reading from connfd");
 
     } else if (num_read == 0) { // EOF
         printf("EOF\n");
@@ -211,23 +218,22 @@ void consume(int connfd) {
 // Read from the pipe and write to all connected sockets
 void fanfrom(int pipefd) {
 
-    char inbuf[1024], outbuf[1024 + 8];
-    int num_read = read(pipefd, &inbuf, 1024);
+    char buf[1024];
+    int num_read = read(pipefd, &buf, 1024);
 
     if (num_read == -1) {
-        error(0, errno, "Error %d reading from %d", errno, pipefd);
+        perror("fanfrom: Error reading from pipefd");
         return;
     } else if (num_read == 0) {
         // EOF on pipe means parent has quit or wants us to stop
         error(EXIT_FAILURE, errno, "Pipe closed. Quit.");
     }
 
-    printf("Faning out: %s\n", inbuf);
+    printf("Faning out: %s\n", buf);
 
-    sprintf(outbuf, "data: %s\n\n", inbuf);
     for (int i=0; i < num_clients; i++) {
-        if ( write(clients[i], outbuf, num_read + 8) == -1 ) {
-            error(0, errno, "Error %d write to client socket %d", errno, clients[i]);
+        if ( write(clients[i], buf, num_read) == -1 ) {
+            perror("fanfrom: Error write to client socket");
         }
     }
 }
@@ -255,12 +261,7 @@ void do_event(struct epoll_event *evp, int sockfd, int efd, int pipefd) {
             printf("EPOLLIN different fd\n");
             consume(connfd);
 
-            /* New connections need this (below is Python):
-                self.send_response(200)
-                self.send_header('Cache-Control', 'no-cache')
-                self.send_header('Content-type', 'text/event-stream')
-                self.end_headers()
-            */
+            // New connections need http response header
 
         }
 
