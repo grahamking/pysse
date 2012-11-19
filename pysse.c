@@ -25,11 +25,81 @@
 
 #define HEAD_TMPL "HTTP/1.1 200 OK\nCache-Control: no-cache\nContent-Type: text/event-stream\n\n"
 
-// Number of connected server-sent events sockets
-int num_clients = 0;
+struct client {
+    int fd;
+    struct client *next;
+};
 
-// File descriptors array, for connected client sockets
-int clients[100];
+// Connected clients
+struct client *head;
+
+// Add a socket file descriptor to client list
+void client_add(int fd) {
+
+    struct client *new;
+    struct client *curr = head;
+
+    new = malloc(sizeof(struct client));
+    new->fd = fd;
+    new->next  = NULL;
+
+    if (head == NULL) {
+        printf("client_add: Adding at head\n");
+        head = new;
+
+    } else {
+
+        while( curr->next != NULL ) {
+            printf("client_add: Step\n");
+            curr = curr->next;
+        }
+        curr->next = new;
+    }
+}
+
+// Remove a socket file descriptor from client list
+// Returns 0 if removed, -1 if not found
+int client_rem(int fd) {
+
+    struct client *prev = head;
+    struct client *curr;
+
+    // 0 - empty list
+    if (head == NULL) {
+#ifdef DEBUG
+        printf("Attempt to remove fd %d from empty list\n", fd);
+#endif
+        return -1;
+    }
+
+    // 1 - match the head
+    if (head->fd == fd) {
+        curr = head->next;
+        free(head);
+        head = curr;
+        return 0;
+    }
+
+    // n - somewhere in list
+    curr = head->next;
+    while(curr != NULL && curr->fd != fd) {
+        prev = curr;
+        curr = curr->next;
+    }
+
+    if (curr == NULL) {
+#ifdef DEBUG
+        printf("fd %d not found in list\n", fd);
+#endif
+        return -1;
+    }
+
+    struct client *next = curr->next;
+    free(curr);
+    prev->next = next;
+
+    return 0;
+}
 
 /* Convert domain name to IP address, if needed */
 const char *as_numeric(const char *address) {
@@ -191,8 +261,7 @@ int acceptnew(int sockfd, int efd, struct epoll_event *evp) {
 
     write_headers(connfd);
 
-    clients[num_clients++] = connfd;  // clients and num_clients are global
-
+    client_add(connfd);
     return 0;
 }
 
@@ -231,11 +300,15 @@ void fanfrom(int pipefd) {
 
     printf("Faning out: %s\n", buf);
 
-    for (int i=0; i < num_clients; i++) {
-        if ( write(clients[i], buf, num_read) == -1 ) {
+    struct client *curr = head;
+    while (curr != NULL) {
+
+        if ( write(curr->fd, buf, num_read) == -1 ) {
             perror("fanfrom: Error write to client socket");
         }
-        printf("%d: Wrote to %d\n", i, clients[i]);
+        printf("Wrote to %d\n", curr->fd);
+
+        curr = curr->next;
     }
 }
 
@@ -261,9 +334,6 @@ void do_event(struct epoll_event *evp, int sockfd, int efd, int pipefd) {
         } else {
             printf("EPOLLIN different fd\n");
             consume(connfd);
-
-            // New connections need http response header
-
         }
 
     } else if (events & EPOLLOUT) {
@@ -335,8 +405,6 @@ int start(const char *address, int port) {
 
     close(pipefds[1]);  // Close write end of the pipe - we only read
 
-    memset(&clients, 1024, sizeof(int));
-
     int sockfd = start_sock(address, port);
 
     int efd = start_epoll(sockfd, pipefds[0]);
@@ -351,6 +419,10 @@ int start(const char *address, int port) {
     }
 
     return 0;
+}
+
+int main(int argc, char **argv) {
+    printf("I'm main\n");
 }
 
 /*
