@@ -50,13 +50,11 @@ void client_add(int fd) {
     new->next  = NULL;
 
     if (head == NULL) {
-        printf("client_add: Adding at head\n");
         head = new;
 
     } else {
 
         while( curr->next != NULL ) {
-            printf("client_add: Step\n");
             curr = curr->next;
         }
         curr->next = new;
@@ -65,7 +63,7 @@ void client_add(int fd) {
 
 // Remove a socket file descriptor from client list
 // Returns 0 if removed, -1 if not found
-int client_rem(int fd) {
+int client_remove(int fd) {
 
     struct client *prev = head;
     struct client *curr;
@@ -428,5 +426,28 @@ int start(const char *address, int port) {
 }
 
 int main(int argc, char **argv) {
-    printf("I'm main\n");
+    printf("Self test start\n");
+
+    client_add(1);
+    client_add(2);
+    client_add(3);
+
+    if (head->next->next->fd != 3) {
+        printf("client_add error\n");
+        return -1;
+    }
+
+    client_remove(2);
+    if (head->next->fd != 3) {
+        printf("client_remove error\n");
+        return -1;
+    }
+    client_remove(1);
+    if (head->fd != 3) {
+        printf("client_remove head error\n");
+        return -1;
+    }
+
+    printf("Success\n");
+    return 0;
 }
