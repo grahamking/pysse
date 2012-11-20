@@ -6,7 +6,13 @@
  * It's a library.
  */
 
-#include <Python.h>
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
 
 #include <errno.h>
 #include <error.h>
@@ -423,34 +429,4 @@ int start(const char *address, int port) {
 
 int main(int argc, char **argv) {
     printf("I'm main\n");
-}
-
-/*
- * Python extension wrapper
- */
-
-static PyObject *pysse_start(PyObject *self, PyObject *args) {
-
-    const char *address;
-    int port;
-
-    printf("Start\n");
-
-    if (!PyArg_ParseTuple(args, "si", &address, &port)) {
-        return NULL;
-    }
-
-    int pipefd = start(address, port);
-
-    return Py_BuildValue("i", pipefd);
-}
-
-static PyMethodDef HelloMethods[] = {
-    {"start", pysse_start, METH_VARARGS, "Start server-sent event server on given port"},
-    {NULL, NULL, 0, NULL}
-};
-
-PyMODINIT_FUNC
-initpysse(void) {
-    (void) Py_InitModule("pysse", HelloMethods);
 }
