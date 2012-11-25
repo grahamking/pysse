@@ -39,6 +39,10 @@ struct client {
 // Connected clients
 struct client *head;
 
+// The message we're writing to clients, and it's length
+char *outm;
+int outm_len;
+
 // Add a socket file descriptor to client list
 void client_add(int fd) {
 
@@ -247,6 +251,9 @@ int acceptnew(int sockfd, int efd, struct epoll_event *evp) {
         }
     }
 
+    //int flag = 1;
+    //setsockopt(connfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+
     /*
     if (connfd >= offsetsz) {
         grow_offset();
@@ -263,6 +270,7 @@ int acceptnew(int sockfd, int efd, struct epoll_event *evp) {
         error(EXIT_FAILURE, errno, "Error %d adding to epoll descriptor", errno);
     }
 
+    // Assume we can write to socket immediately. Is that a safe assumption?
     write_headers(connfd);
 
     client_add(connfd);
@@ -288,11 +296,25 @@ void consume(int connfd) {
 
 }
 
-// Read from the pipe and write to all connected sockets
-void fanfrom(int pipefd) {
+// Set epoll events for the socket. Used to add or remove EPOLLOUT.
+void set_epoll(int efd, int connfd, uint32_t events) {
 
-    char buf[1024];
-    int num_read = read(pipefd, &buf, 1024);
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof(struct epoll_event));
+
+    ev.events = events;
+    ev.data.fd = connfd;
+    if (epoll_ctl(efd, EPOLL_CTL_MOD, connfd, &ev) == -1) {
+        error(EXIT_FAILURE, errno, "set_epoll: Error %d.", errno);
+    }
+}
+
+// Read from the pipe and write to all connected sockets
+void fanfrom(int efd, int pipefd) {
+    char *buf;
+    buf = calloc(1, 1024);  // calloc because it sets contents to zero
+
+    int num_read = read(pipefd, buf, 1024);
 
     if (num_read == -1) {
         perror("fanfrom: Error reading from pipefd");
@@ -302,16 +324,14 @@ void fanfrom(int pipefd) {
         error(EXIT_FAILURE, errno, "Pipe closed. Quit.");
     }
 
-    printf("Faning out: %s\n", buf);
+    outm = buf;
+    outm_len = num_read;
+    printf("Faning out: %s\n", outm);
 
     struct client *curr = head;
     while (curr != NULL) {
 
-        if ( write(curr->fd, buf, num_read) == -1 ) {
-            perror("fanfrom: Error write to client socket");
-        }
-        printf("Wrote to %d\n", curr->fd);
-
+        set_epoll(efd, curr->fd, EPOLLIN | EPOLLOUT);
         curr = curr->next;
     }
 }
@@ -332,8 +352,8 @@ void do_event(struct epoll_event *evp, int sockfd, int efd, int pipefd) {
             acceptnew(sockfd, efd, evp);
 
         } else if (connfd == pipefd) {
-            printf("pipefd\n");
-            fanfrom(connfd);
+            printf("pipefd. Calling fanfrom.\n");
+            fanfrom(efd, connfd);
 
         } else {
             printf("EPOLLIN different fd\n");
@@ -345,19 +365,19 @@ void do_event(struct epoll_event *evp, int sockfd, int efd, int pipefd) {
         printf("EPOLLOUT %d\n", connfd);
 #endif
 
-        /*
-        done = swrite_sendfile(connfd, datafd, datasz);
-
-        if (done == 1) {
-            shut(connfd, efd);
+        // Write the outgoing message to this socket
+        if ( write(connfd, outm, outm_len) == -1 ) {
+            perror("Error write outm to client socket");
         }
-        */
+        printf("Wrote to %d\n", connfd);
+
+        // Remove that socket from EPOLLOUT list, we are done writing to it
+        set_epoll(efd, connfd, EPOLLIN);
 
     } else if (events & EPOLLHUP) {
 #ifdef DEBUG
         printf("EPOLLHUP %d\n", connfd);
 #endif
-        //sclose(connfd);
     }
 }
 
@@ -381,7 +401,10 @@ void main_loop(int efd, int sockfd, int pipefd) {
             do_event(&events[i], sockfd, efd, pipefd);
         }
 
-        sleep(1);   // for development
+#ifdef DEBUG
+        sleep(1);   // Slow things down so we can see what's going on
+#endif
+
     }
 }
 
@@ -425,7 +448,8 @@ int start(const char *address, int port) {
     return 0;
 }
 
-int main(int argc, char **argv) {
+// Check various things are working correctly
+int self_test() {
     printf("Self test start\n");
 
     client_add(1);
@@ -448,6 +472,28 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    printf("Success\n");
+    printf("Self test success\n");
+    return 0;
+}
+
+char TEST_ADDR[] = "127.0.0.1";
+int TEST_PORT = 1234;
+
+int main(int argc, char **argv) {
+
+    if (self_test() == -1) {
+        return -1;
+    }
+
+    printf("Starting test server on %s. Input is from stdin.\n", TEST_ADDR);
+    int fd;
+    fd = start(TEST_ADDR, TEST_PORT);
+
+    char buf[256];
+    int num_read;
+    while ( (num_read = read(STDIN_FILENO, &buf, 256)) != EOF) {
+        write(fd, &buf, num_read);
+    }
+
     return 0;
 }
