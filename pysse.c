@@ -29,7 +29,7 @@
 
 #define DEBUG     // Comment in for verbose output
 
-#define HEAD_TMPL "HTTP/1.1 200 OK\nCache-Control: no-cache\nContent-Type: text/event-stream\nConnection: keep-alive\n\n"
+#define HEAD_TMPL "HTTP/1.1 200 OK\nCache-Control: no-cache\nContent-Type: text/event-stream\nConnection: keep-alive\nAccess-Control-Allow-Origin: *\n\n"
 
 struct client {
     int fd;
@@ -347,7 +347,7 @@ void fanfrom(int efd, int pipefd) {
 
     outm = buf;
     outm_len = num_read;
-    ensure_two_cr(outm);
+    outm_len = ensure_two_cr(outm);
 
     printf("Faning out: %s\n", outm);
     printf("Length: %zu\n", strlen(outm));
