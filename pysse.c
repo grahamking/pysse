@@ -29,7 +29,7 @@
 
 #define DEBUG     // Comment in for verbose output
 
-#define HEAD_TMPL "HTTP/1.1 200 OK\nCache-Control: no-cache\nContent-Type: text/event-stream\n\n"
+#define HEAD_TMPL "HTTP/1.1 200 OK\nCache-Control: no-cache\nContent-Type: text/event-stream\nConnection: keep-alive\n\n"
 
 struct client {
     int fd;
@@ -309,6 +309,27 @@ void set_epoll(int efd, int connfd, uint32_t events) {
     }
 }
 
+/* Ensure that the outgoing message ends with exactly two carriage returns.
+ * Returns the new length. Modifies s, which must be big enough to
+ * fit the two CR.
+ */
+int ensure_two_cr(char *s) {
+
+    int s_len = strlen(s);
+
+    // Remove any trailing \n
+    while (s[s_len - 1] == '\n') {
+        s[s_len - 1] = '\0';
+        s_len--;
+    }
+
+    // Add exactly two
+    s[s_len] = '\n';
+    s[s_len + 1] = '\n';
+
+    return s_len + 2;
+}
+
 // Read from the pipe and write to all connected sockets
 void fanfrom(int efd, int pipefd) {
     char *buf;
@@ -326,7 +347,10 @@ void fanfrom(int efd, int pipefd) {
 
     outm = buf;
     outm_len = num_read;
+    ensure_two_cr(outm);
+
     printf("Faning out: %s\n", outm);
+    printf("Length: %zu\n", strlen(outm));
 
     struct client *curr = head;
     while (curr != NULL) {
@@ -348,15 +372,15 @@ void do_event(struct epoll_event *evp, int sockfd, int efd, int pipefd) {
         printf("EPOLLIN %d\n", connfd);
 #endif
         if (connfd == sockfd) {
-            printf("sockfd\n");
+            printf("EPOLLIN sockfd - new client\n");
             acceptnew(sockfd, efd, evp);
 
         } else if (connfd == pipefd) {
-            printf("pipefd. Calling fanfrom.\n");
+            printf("EPOLLIN pipefd - new message to deliver.\n");
             fanfrom(efd, connfd);
 
         } else {
-            printf("EPOLLIN different fd\n");
+            printf("EPOLLIN client fd\n");
             consume(connfd);
         }
 
@@ -469,6 +493,17 @@ int self_test() {
     client_remove(1);
     if (head->fd != 3) {
         printf("client_remove head error\n");
+        return -1;
+    }
+
+    char e_one[10] = "Test\n";
+    int len1 = ensure_two_cr(e_one);
+    if (strcmp(e_one, "Test\n\n") != 0) {
+        printf("ensure_two_cr error. Got '%s' expected 'Test\\n\\n'\n", e_one);
+        return -1;
+    }
+    if (len1 != 6) {
+        printf("ensure_two_cr return error. Got %d, expected 6\n", len1);
         return -1;
     }
 
