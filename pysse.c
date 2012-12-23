@@ -277,23 +277,37 @@ int acceptnew(int sockfd, int efd, struct epoll_event *evp) {
     return 0;
 }
 
-// Read from fd and write to stdout - for dev
-void consume(int connfd) {
+// Requested path from fd
+char *path(int connfd) {
 
-    char buf[1024];
-    int num_read = read(connfd, &buf, 1024);
+    char *buf;
+    buf = calloc(1, 1024);
+    int num_read = read(connfd, buf, 1024);
+    char *tok;
 
     if (num_read == -1) {
-        perror("consume: Error reading from connfd");
+        perror("path: Error reading from connfd");
 
     } else if (num_read == 0) { // EOF
         printf("EOF\n");
         close(connfd);
 
     } else {
+#ifdef DEBUG
         printf("%s\n", buf);
+#endif
+
+        // Parse out the requested url
+        tok = strtok(buf, " ");
+        if (strcmp(tok, "GET") == 0) {
+            tok = strtok(NULL, " ");
+            printf("URL: %s\n", tok);
+        }
+
     }
 
+    free(buf);
+    return tok;
 }
 
 // Set epoll events for the socket. Used to add or remove EPOLLOUT.
@@ -345,9 +359,20 @@ void fanfrom(int efd, int pipefd) {
         error(EXIT_FAILURE, errno, "Pipe closed. Quit.");
     }
 
+    if (buf[0] == '/') {
+        printf("Started with slash\n");
+        char *tok = strtok(buf, " ");
+        printf("URL: %s\n", tok);
+        tok = strtok(NULL, "\n");
+    }
+
     outm = buf;
     outm_len = num_read;
+
+#ifdef DEBUG
+    // Add a second carriage return, in DEBUG, so we can test from command line
     outm_len = ensure_two_cr(outm);
+#endif
 
     printf("Faning out: %s\n", outm);
     printf("Length: %zu\n", strlen(outm));
@@ -371,17 +396,24 @@ void do_event(struct epoll_event *evp, int sockfd, int efd, int pipefd) {
 #ifdef DEBUG
         printf("EPOLLIN %d\n", connfd);
 #endif
+
         if (connfd == sockfd) {
+#ifdef DEBUG
             printf("EPOLLIN sockfd - new client\n");
+#endif
             acceptnew(sockfd, efd, evp);
 
         } else if (connfd == pipefd) {
+#ifdef DEBUG
             printf("EPOLLIN pipefd - new message to deliver.\n");
+#endif
             fanfrom(efd, connfd);
 
         } else {
+#ifdef DEBUG
             printf("EPOLLIN client fd\n");
-            consume(connfd);
+#endif
+            char *req_path = path(connfd);
         }
 
     } else if (events & EPOLLOUT) {
@@ -496,6 +528,7 @@ int self_test() {
         return -1;
     }
 
+    /*
     char e_one[10] = "Test\n";
     int len1 = ensure_two_cr(e_one);
     if (strcmp(e_one, "Test\n\n") != 0) {
@@ -506,6 +539,7 @@ int self_test() {
         printf("ensure_two_cr return error. Got %d, expected 6\n", len1);
         return -1;
     }
+    */
 
     printf("Self test success\n");
     return 0;
