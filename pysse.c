@@ -6,6 +6,33 @@
  * It's a library.
  */
 
+/*
+ * # Outline:
+ *
+ * main
+ *
+ * start:
+ *  fork (sys)
+ *  start_sock
+ *  start_epoll
+ *  main_loop
+ *  Returns fd of pipe to write to. Everything written to pipe goes to clients.
+ *
+ * main_loop:
+ *  epoll_wait (sys)
+ *  do_event
+ *
+ * do_event:
+ *  if EPOLLIN (something ready to be read from):
+ *      if new connection: acceptnew
+ *      if from pipe (something to write to clients): fanfrom
+ *      else (client socket's GET request): path
+ *  if EPOLLOUT (something ready to be written to):
+ *      write (sys): Write to the socket
+ *      set_epoll: remove written socket from epollout list
+ *
+ */
+
 #define _GNU_SOURCE
 
 #include <stdio.h>
@@ -344,7 +371,8 @@ int ensure_two_cr(char *s) {
     return s_len + 2;
 }
 
-// Read from the pipe and write to all connected sockets
+// Read from the pipe and add all connected sockets to epoll out watch list
+// so that when they are ready for io we write the message to them
 void fanfrom(int efd, int pipefd) {
     char *buf;
     buf = calloc(1, 1024);  // calloc because it sets contents to zero
