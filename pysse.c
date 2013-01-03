@@ -312,7 +312,7 @@ char *path(int connfd) {
     char *buf;
     buf = calloc(1, 1024);
     int num_read = read(connfd, buf, 1024);
-    char *tok;
+    char *tok = NULL;
 
     if (num_read == -1) {
         perror("path: Error reading from connfd");
@@ -335,7 +335,6 @@ char *path(int connfd) {
 
     }
 
-    free(buf);
     return tok;
 }
 
@@ -412,20 +411,45 @@ void fanfrom(int efd, int pipefd) {
 
     printf("Faning out: %s\n", outm);
     printf("Length: %zu\n", strlen(outm));
-    if (url) {
-        printf("Faning only to clients of: %s\n", url);
-    }
 
     struct client *curr = head;
-    while (curr != NULL) {
 
-        // WORK HERE
-        /*
-        if (curr->url != NULL) {
+    if (url != NULL) {
+#ifdef DEBUG
+        printf("Faning only to clients of: %s\n", url);
+#endif
+        while (curr != NULL) {
+            //printf("fd: %d, url: %s\n", curr->fd, curr->url);
+            if (curr->url != NULL && strcmp(curr->url, url) == 0) {
+                //printf("Adding %d\n", curr->fd);
+                set_epoll(efd, curr->fd, EPOLLIN | EPOLLOUT);
+            }
+            curr = curr->next;
         }
-        */
-        set_epoll(efd, curr->fd, EPOLLIN | EPOLLOUT);
+
+    } else {
+#ifdef DEBUG
+        printf("Faning to all clients (no url)\n");
+#endif
+        while (curr != NULL) {
+            set_epoll(efd, curr->fd, EPOLLIN | EPOLLOUT);
+            curr = curr->next;
+        }
+    }
+
+}
+
+// Set the URL in a client structure, that a client is subscribing to
+void set_url(int fd, char *url) {
+
+    struct client *curr = head;
+    while (curr != NULL && curr->fd != fd) {
         curr = curr->next;
+    }
+
+    if (curr) {
+        curr->url = url;
+        printf("Set url for %d to %s\n", fd, url);
     }
 }
 
@@ -458,6 +482,11 @@ void do_event(struct epoll_event *evp, int sockfd, int efd, int pipefd) {
             printf("EPOLLIN client fd\n");
 #endif
             char *req_path = path(connfd);
+
+            // Set path if found and not "/"
+            if (req_path != NULL && strlen(req_path) > 1) {
+                set_url(connfd, req_path);
+            }
         }
 
     } else if (events & EPOLLOUT) {
