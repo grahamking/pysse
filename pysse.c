@@ -530,10 +530,7 @@ void main_loop(int efd, int sockfd, int pipefd) {
             do_event(&events[i], sockfd, efd, pipefd);
         }
 
-#ifdef DEBUG
-        sleep(1);   // Slow things down so we can see what's going on
-#endif
-
+        //sleep(1);   // Slow things down so we can see what's going on
     }
 }
 
@@ -578,7 +575,7 @@ int start(const char *address, int port) {
 }
 
 // Check various things are working correctly
-int self_test() {
+int self_test(void) {
     printf("Self test start\n");
 
     client_add(1);

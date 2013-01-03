@@ -11,6 +11,8 @@
 
 #include <Python.h>
 
+int start(const char *address, int port);
+
 static PyObject *pysse_start(PyObject *self, PyObject *args) {
 
     const char *address;
