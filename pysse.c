@@ -60,6 +60,7 @@
 
 struct client {
     int fd;
+    char *url;
     struct client *next;
 };
 
@@ -78,6 +79,7 @@ void client_add(int fd) {
 
     new = malloc(sizeof(struct client));
     new->fd = fd;
+    new->url = NULL;
     new->next  = NULL;
 
     if (head == NULL) {
@@ -387,15 +389,21 @@ void fanfrom(int efd, int pipefd) {
         error(EXIT_FAILURE, errno, "Pipe closed. Quit.");
     }
 
+    char *url = NULL;
+
     if (buf[0] == '/') {
         printf("Started with slash\n");
-        char *tok = strtok(buf, " ");
-        printf("URL: %s\n", tok);
-        tok = strtok(NULL, "\n");
-    }
+        url = strtok(buf, " ");
+        printf("URL: %s\n", url);
+        char *tok = strtok(NULL, "\n");
 
-    outm = buf;
-    outm_len = num_read;
+        outm = tok;
+        outm_len = strlen(tok);
+
+    } else {
+        outm = buf;
+        outm_len = num_read;
+    }
 
 #ifdef DEBUG
     // Add a second carriage return, in DEBUG, so we can test from command line
@@ -404,10 +412,18 @@ void fanfrom(int efd, int pipefd) {
 
     printf("Faning out: %s\n", outm);
     printf("Length: %zu\n", strlen(outm));
+    if (url) {
+        printf("Faning only to clients of: %s\n", url);
+    }
 
     struct client *curr = head;
     while (curr != NULL) {
 
+        // WORK HERE
+        /*
+        if (curr->url != NULL) {
+        }
+        */
         set_epoll(efd, curr->fd, EPOLLIN | EPOLLOUT);
         curr = curr->next;
     }
