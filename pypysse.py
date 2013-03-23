@@ -5,6 +5,7 @@ import os
 import sys
 import redis
 import threading
+import fcntl
 
 import time
 
@@ -68,6 +69,11 @@ class Server(object):
         a Redis queue.
         """
         p_read, p_write = os.pipe()
+
+        # Set p_read to non blocking
+        fl = fcntl.fcntl(p_read, fcntl.F_GETFL)
+        fcntl.fcntl(p_read, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
         self.ep.register(p_read, select.EPOLLIN)
 
         start_redis_thread(REDIS_QUEUE, p_write)
@@ -79,7 +85,7 @@ class Server(object):
         """
 
         conn, _ = self.sock.accept()
-        print("Accepted: %d" % conn.fileno())
+        #print("Accepted: %d" % conn.fileno())
         conn.setblocking(0)
 
         self.ep.register(conn.fileno(), select.EPOLLIN)
@@ -90,7 +96,20 @@ class Server(object):
     def get_redis_command(self):
         """Read command from redis pipe.
         """
-        self.out_message = os.read(self.p_read, 1024)
+        new_command = ""
+
+        msg = os.read(self.p_read, 1024)
+        while msg:
+            new_command += msg
+            try:
+                msg = os.read(self.p_read, 1024)
+            except OSError: # EAGAIN, we're done reading
+                break
+
+        self.out_message =  new_command
+
+        sys.stdout.write(self.out_message)
+        sys.stdout.flush()
 
     def listen_for_out(self):
         """Listen for EPOLLOUT readiness on all the connections
@@ -98,7 +117,7 @@ class Server(object):
         ep: epoll object.
         """
         for fd in self.conns.keys():
-            print("listen_for_out: %d" % fd)
+            #print("listen_for_out: %d" % fd)
             try:
                 self.ep.modify(fd, select.EPOLLIN | select.EPOLLOUT)
             except IOError:
@@ -112,6 +131,13 @@ class Server(object):
                 yield event
             time.sleep(0.5)
 
+    def close(self, fd):
+        """Close a file descriptor, removing it from internal list.
+        """
+        self.conns[fd].close()
+        del self.conns[fd]
+        print("Closed %d" % fd)
+
     def run(self):
         """main_loop. Runs forever"""
 
@@ -121,40 +147,52 @@ class Server(object):
             print("----- {}".format(event))
 
             efd, etype = event
-            if etype == select.EPOLLIN:
+            if etype & select.EPOLLHUP:
+                print("EPOLLHUP: %d" % efd)
+                self.close(efd)
+                continue    # Ignore all other events
+
+            if etype & select.EPOLLIN:
                 print("EPOLLIN: %d" % efd)
 
-                if efd == sockfd:   # New client connection
+                if efd == sockfd:           # New client connection
 
                     self.acceptnew()
 
-                elif efd == self.p_read: # New command from Redis
+                elif efd == self.p_read:    # New command from Redis
 
                     self.get_redis_command()
                     self.listen_for_out()
 
-                else:   # From a client socket
+                else:                       # From a client socket
 
-                    inp = os.read(efd, 1024)
+                    try:
+                        inp = os.read(efd, 1024)
+                    except OSError:
+                        print("OSError, closing %d" % efd)
+                        self.close(efd)
+                        continue
+
                     if not inp: # EOF
-                        self.conns[efd].close()
-                        del self.conns[efd]
-                        print("Closed %d" % efd)
+                        self.close(efd)
+                        continue
 
                     else:
                         print(inp)
 
-            elif etype == select.EPOLLOUT:
+            if etype & select.EPOLLOUT:
                 print("EPOLLOUT: %d" % efd)
 
                 if not self.out_message:
                     continue
 
                 num_wrote = os.write(efd, self.out_message)
-                print("Wrote %d bytes" % num_wrote)
+                print("Wrote: ---")
+                print(self.out_message)
+                print("Wrote %d bytes of %d" % (num_wrote, len(self.out_message)))
                 self.ep.modify(efd, select.EPOLLIN)
 
-            print("Open conns: {}".format(self.conns.keys()))
+            #print("Open conns: {}".format(self.conns.keys()))
 
 
 def main():
